@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import { getKey, setKey, extract, searchDatasheets, validate, fix, exportAas, fetchDatasheet, merge, listExtractions, replayExtraction, verifySource, runtimePoll, listWebhooks, registerWebhook, type MergeSource, PUBLIC_API_BASE, type ApiResult } from "@/lib/api"
+import { getKey, setKey, extract, searchDatasheets, validate, fix, exportAas, fetchDatasheet, merge, listExtractions, replayExtraction, verifySource, runtimePoll, listWebhooks, registerWebhook, providers, type MergeSource, PUBLIC_API_BASE, type ApiResult } from "@/lib/api"
 import { parseIssues, groupByConstraint, type ParsedIssue } from "@/lib/validation"
 
 const SAMPLE_SUBMODELS = JSON.stringify(
@@ -58,6 +58,7 @@ export default function Playground() {
         </div>
       </div>
 
+      <ProviderHealthCard />
       <ExtractCard />
       <FindByNameCard />
       <ValidateFixCard />
@@ -65,6 +66,65 @@ export default function Playground() {
       <ExtractionsCard />
       <RuntimeCard />
       <WebhooksCard />
+    </div>
+  )
+}
+
+/* ─────────────── Model health (ensemble headroom) ─────────────── */
+const PROV_STATUS: Record<string, { label: string; cls: string }> = {
+  ok: { label: "ok", cls: "ok" },
+  no_credits: { label: "no credits", cls: "bad" },
+  rate_limited: { label: "rate-limited", cls: "warn" },
+  invalid_key: { label: "invalid key", cls: "bad" },
+  unconfigured: { label: "not configured", cls: "" },
+  unreachable: { label: "unreachable", cls: "warn" },
+}
+// Same preference order the API arbiter chain uses.
+const ARBITER_ORDER = ["anthropic", "openai", "gemini", "grok"]
+
+function ProviderHealthCard() {
+  const [busy, setBusy] = useState(false)
+  const [r, setR] = useState<ApiResult | null>(null)
+  async function check(force?: boolean) {
+    setBusy(true)
+    try { setR(await providers(force)) } finally { setBusy(false) }
+  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const list: any[] = r?.ok && Array.isArray((r.json as any)?.providers) ? (r.json as any).providers : []
+  const okCount = list.filter(p => p.status === "ok").length
+  // Active arbiter = first usable model in the chain order.
+  const arbiter = ARBITER_ORDER.find(p => list.some(x => x.provider === p && x.status === "ok"))
+  const noCredits = list.filter(p => p.status === "no_credits").map(p => p.provider)
+
+  return (
+    <div className="card">
+      <h2>Model health</h2>
+      <div className="hint">Probes each configured provider (1 token each) and shows which models the ensemble can use right now — and which are out of credits. Cached ~30s.</div>
+      <div className="row">
+        <button onClick={() => check()} disabled={busy}>{busy ? "Checking…" : "Check models"}</button>
+        {r && <button className="ghost" onClick={() => check(true)} disabled={busy}>force refresh</button>}
+      </div>
+      {r && !r.ok && <ErrorNote r={r} />}
+      {list.length > 0 && (
+        <>
+          <div className="group-h" style={{ marginTop: 12 }}>{okCount} model{okCount === 1 ? "" : "s"} usable · arbiter {arbiter || "— (majority fallback)"}</div>
+          <div className="kv">
+            {list.map(p => {
+              const s = PROV_STATUS[p.status] || { label: p.status, cls: "warn" }
+              return (
+                <span key={p.provider} className={`pill ${s.cls}`} title={p.detail || ""}>
+                  {p.provider}: {s.label}{p.provider === arbiter ? " · arbiter" : ""}
+                </span>
+              )
+            })}
+          </div>
+          {noCredits.length > 0 && (
+            <div className="path" style={{ marginTop: 6 }}>
+              {noCredits.join(", ")} out of credits — dropped from the vote; the arbiter rolls to <b>{arbiter || "majority vote"}</b>.
+            </div>
+          )}
+        </>
+      )}
     </div>
   )
 }

@@ -115,6 +115,11 @@ export function health(): Promise<ApiResult> {
   return run("health", "GET", {}, curlFor("health", "GET", {}))
 }
 
+export function providers(force?: boolean): Promise<ApiResult> {
+  const ep = force ? "providers?force=1" : "providers"
+  return run(ep, "GET", {}, curlFor("providers", "GET", {}))
+}
+
 export type MergeSource = { sourceId: string; authority: "manufacturer" | "distributor" | "third-party"; result: unknown }
 
 /** Multi-source consensus merge of N already-extracted results. */
