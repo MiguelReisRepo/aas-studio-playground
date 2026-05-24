@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import { getKey, setKey, extract, searchDatasheets, validate, fix, exportAas, fetchDatasheet, merge, type MergeSource, PUBLIC_API_BASE, type ApiResult } from "@/lib/api"
+import { getKey, setKey, extract, searchDatasheets, validate, fix, exportAas, fetchDatasheet, merge, listExtractions, replayExtraction, verifySource, runtimePoll, listWebhooks, registerWebhook, type MergeSource, PUBLIC_API_BASE, type ApiResult } from "@/lib/api"
 import { parseIssues, groupByConstraint, type ParsedIssue } from "@/lib/validation"
 
 const SAMPLE_SUBMODELS = JSON.stringify(
@@ -62,6 +62,9 @@ export default function Playground() {
       <FindByNameCard />
       <ValidateFixCard />
       <ExportCard />
+      <ExtractionsCard />
+      <RuntimeCard />
+      <WebhooksCard />
     </div>
   )
 }
@@ -445,6 +448,95 @@ function ExportCard() {
         <button className="ghost" onClick={() => go("aasx")} disabled={busy}>Export .aasx</button>
       </div>
       {r?.text && <pre className="code">{r.text.slice(0, 20000)}</pre>}
+      {r && r.status >= 400 && <ErrorNote r={r} />}
+      <Inspector r={r} />
+    </div>
+  )
+}
+
+/* ─────────────── Extractions (list / replay / verify-source) ─────────────── */
+function ExtractionsCard() {
+  const [r, setR] = useState<ApiResult | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [rowR, setRowR] = useState<ApiResult | null>(null)
+  const [rowBusy, setRowBusy] = useState<string | null>(null)
+  const items = (r?.json as any)?.extractions || []
+  async function load() { setBusy(true); setRowR(null); setR(await listExtractions()); setBusy(false) }
+  async function replay(id: string) { setRowBusy(`replay:${id}`); setRowR(await replayExtraction(id)); setRowBusy(null) }
+  async function verify(id: string) { setRowBusy(`verify:${id}`); setRowR(await verifySource(id)); setRowBusy(null) }
+  return (
+    <div className="card">
+      <h2>5 · Extractions {busy && <span className="spin" />}</h2>
+      <div className="hint">GET /extractions, POST /extractions/{"{id}"}/replay (deterministic re-merge), GET /extractions/{"{id}"}/verify-source (re-fetch the source + confirm bytes haven&apos;t drifted).</div>
+      <button onClick={load} disabled={busy}>List my extractions</button>
+      {Array.isArray(items) && items.length > 0 && (
+        <div style={{ marginTop: 12 }}>
+          {items.slice(0, 10).map((it: any, i: number) => (
+            <div className="hit" key={i}>
+              <div><b className="mono">{it.assetIdShort || it.id}</b> <span className="path">{it.id}</span></div>
+              <div className="row" style={{ marginTop: 6 }}>
+                <button className="ghost" style={{ padding: "4px 10px", fontSize: 12 }} disabled={!!rowBusy} onClick={() => replay(it.id)}>{rowBusy === `replay:${it.id}` ? "…" : "Replay"}</button>
+                <button className="ghost" style={{ padding: "4px 10px", fontSize: 12 }} disabled={!!rowBusy} onClick={() => verify(it.id)}>{rowBusy === `verify:${it.id}` ? "…" : "Verify source"}</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      {Array.isArray(items) && items.length === 0 && r?.ok && <div className="path" style={{ marginTop: 8 }}>No extractions yet — they&apos;re recorded when you extract via the API.</div>}
+      {r && r.status >= 400 && <ErrorNote r={r} />}
+      <Inspector r={rowR || r} />
+    </div>
+  )
+}
+
+/* ─────────────── Runtime poll (Asset Interface Description) ─────────────── */
+const SAMPLE_AID = JSON.stringify({ idShort: "AssetInterfacesDescription", submodelElements: [] }, null, 2)
+function RuntimeCard() {
+  const [aid, setAid] = useState(SAMPLE_AID)
+  const [r, setR] = useState<ApiResult | null>(null)
+  const [busy, setBusy] = useState(false)
+  async function go() {
+    let parsed: unknown
+    try { parsed = JSON.parse(aid) } catch { alert("AID must be valid JSON"); return }
+    setBusy(true); setR(await runtimePoll(parsed)); setBusy(false)
+  }
+  const readings = (r?.json as any)?.readings
+  return (
+    <div className="card">
+      <h2>6 · Runtime poll {busy && <span className="spin" />}</h2>
+      <div className="hint">POST /runtime/poll — reads live HTTP datapoints from an Asset Interface Description (IDTA-02017) submodel. SSRF-guarded server-side.</div>
+      <label>AID submodel (JSON)</label>
+      <textarea className="mono" value={aid} onChange={e => setAid(e.target.value)} />
+      <div className="row" style={{ marginTop: 10 }}><button onClick={go} disabled={busy}>Poll datapoints</button></div>
+      {Array.isArray(readings) && <div className="kv" style={{ marginTop: 10 }}><span>readings <b>{readings.length}</b></span></div>}
+      {r && r.status >= 400 && <ErrorNote r={r} />}
+      <Inspector r={r} />
+    </div>
+  )
+}
+
+/* ─────────────── Webhooks ─────────────── */
+function WebhooksCard() {
+  const [r, setR] = useState<ApiResult | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [url, setUrl] = useState("")
+  async function list() { setBusy(true); setR(await listWebhooks()); setBusy(false) }
+  async function register() { if (!url.trim()) return; setBusy(true); setR(await registerWebhook(url.trim(), ["extraction.completed"])); setBusy(false) }
+  const hooks = (r?.json as any)?.webhooks || (r?.json as any)?.subscriptions || []
+  return (
+    <div className="card">
+      <h2>7 · Webhooks {busy && <span className="spin" />}</h2>
+      <div className="hint">GET /webhooks (list) + POST /webhooks (register an endpoint for events like extraction.completed; deliveries are HMAC-signed).</div>
+      <div className="row">
+        <input type="text" placeholder="https://your-app.example/hooks" value={url} onChange={e => setUrl(e.target.value)} style={{ maxWidth: 360 }} />
+        <button onClick={register} disabled={busy || !url.trim()}>Register</button>
+        <button className="ghost" onClick={list} disabled={busy}>List</button>
+      </div>
+      {Array.isArray(hooks) && hooks.length > 0 && (
+        <div style={{ marginTop: 10 }}>
+          {hooks.map((h: any, i: number) => <div className="hit" key={i}><b className="mono">{h.url}</b> <span className="path">{(h.events || []).join(", ")}</span></div>)}
+        </div>
+      )}
       {r && r.status >= 400 && <ErrorNote r={r} />}
       <Inspector r={r} />
     </div>

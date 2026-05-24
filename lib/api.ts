@@ -116,6 +116,25 @@ export function merge(sources: MergeSource[]): Promise<ApiResult> {
   return run("merge", "POST", jsonInit(body), curlFor("merge", "POST", { json: { sources: [{ sourceId: "src-1", authority: "manufacturer", result: "{…ExtractionResult…}" }] } }))
 }
 
+export function listExtractions(): Promise<ApiResult> {
+  return run("extractions", "GET", {}, curlFor("extractions", "GET", {}))
+}
+export function replayExtraction(id: string): Promise<ApiResult> {
+  return run(`extractions/${encodeURIComponent(id)}/replay`, "POST", jsonInit({}), curlFor(`extractions/${id}/replay`, "POST", { json: {} }))
+}
+export function verifySource(id: string): Promise<ApiResult> {
+  return run(`extractions/${encodeURIComponent(id)}/verify-source`, "GET", {}, curlFor(`extractions/${id}/verify-source`, "GET", {}))
+}
+export function runtimePoll(aid: unknown): Promise<ApiResult> {
+  return run("runtime/poll", "POST", jsonInit({ aid }), curlFor("runtime/poll", "POST", { json: { aid: "{…AID (IDTA-02017) submodel…}" } }))
+}
+export function listWebhooks(): Promise<ApiResult> {
+  return run("webhooks", "GET", {}, curlFor("webhooks", "GET", {}))
+}
+export function registerWebhook(url: string, events: string[]): Promise<ApiResult> {
+  return run("webhooks", "POST", jsonInit({ url, events }), curlFor("webhooks", "POST", { json: { url, events } }))
+}
+
 /** Fetch a datasheet PDF (found via search) through the guarded fetch proxy, as
  *  a File ready to hand to extract(). Returns null on failure. */
 export async function fetchDatasheet(url: string): Promise<File | null> {
