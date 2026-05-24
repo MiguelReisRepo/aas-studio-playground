@@ -225,13 +225,14 @@ function FindByNameCard() {
   const [r, setR] = useState<ApiResult | null>(null)
   const [chain, setChain] = useState<{ i: number; step: string } | null>(null)
   const [chainErr, setChainErr] = useState<string | null>(null)
-  async function go() { if (!q.trim()) return; setBusy(true); setR(await searchDatasheets(q.trim())); setBusy(false) }
+  const [lastEx, setLastEx] = useState<{ asset: string; submodels: string } | null>(null)
+  async function go() { if (!q.trim()) return; setBusy(true); setLastEx(null); setChainErr(null); setR(await searchDatasheets(q.trim())); setBusy(false) }
   const hits = (r?.json as any)?.results || (r?.json as any)?.hits || []
 
   // hit URL → fetch PDF (guarded proxy) → /extract → /export .aasx → download.
   // The public API has no URL→AAS path, so the console chains it.
   async function toAasx(url: string, i: number) {
-    setChainErr(null); setChain({ i, step: "fetching PDF…" })
+    setChainErr(null); setLastEx(null); setChain({ i, step: "fetching PDF…" })
     const file = await fetchDatasheet(url)
     if (!file) { setChain(null); setChainErr("Couldn't fetch that PDF (blocked host, CORS, or too large)."); return }
     setChain({ i, step: "extracting…" })
@@ -243,6 +244,7 @@ function FindByNameCard() {
     setChain(null)
     if (res.status >= 400 || (!res.blob && !res.text)) { setChainErr("Export failed."); return }
     downloadResult(res, rr.assetIdShort || "aas", "aasx")
+    setLastEx({ asset: rr.assetIdShort || "aas", submodels: (rr.submodels || []).map((s: any) => s.idShort).join(", ") || "—" })
   }
 
   // Multi-source consensus: extract each selected hit, then /merge with
@@ -336,6 +338,12 @@ function FindByNameCard() {
         </div>
       )}
       {chainErr && <div className="verdict bad" style={{ marginTop: 10 }}>✗ {chainErr}</div>}
+      {lastEx && (
+        <div className="verdict ok" style={{ marginTop: 10, display: "block" }}>
+          ✓ Extracted <b className="mono">{lastEx.asset}</b> — .aasx downloaded.
+          <div style={{ fontWeight: 400, fontSize: 12, marginTop: 4 }}>submodels: {lastEx.submodels}</div>
+        </div>
+      )}
       {r && r.status !== 200 && <ErrorNote r={r} />}
       <Inspector r={r} />
     </div>
@@ -400,7 +408,7 @@ function ValidateFixCard() {
       </div>
       {loadNote && <div className="path" style={{ marginBottom: 8 }}>{loadNote}</div>}
       <label>AAS XML</label>
-      <textarea className="mono" placeholder="<environment xmlns=&quot;https://admin-shell.io/aas/3/1&quot;> …" value={xml} onChange={e => setXml(e.target.value)} />
+      <textarea className="mono" placeholder="<environment xmlns=&quot;https://admin-shell.io/aas/3/1&quot;> …" value={xml} onChange={e => { setXml(e.target.value); setR(null); setFixed(null) }} />
       <div className="row" style={{ marginTop: 10 }}>
         <button onClick={doValidate} disabled={!!busy || !xml.trim()}>Validate</button>
         <button className="ghost" onClick={doFix} disabled={!!busy || !xml.trim()}>Auto-fix</button>
