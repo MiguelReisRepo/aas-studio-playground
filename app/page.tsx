@@ -132,11 +132,12 @@ function ExtractCard() {
   const [over, setOver] = useState(false)
   const [busy, setBusy] = useState(false)
   const [r, setR] = useState<ApiResult | null>(null)
+  const [thumbUrl, setThumbUrl] = useState("")
   const fileRef = useRef<HTMLInputElement>(null)
 
   async function go(file: File) {
     setBusy(true); setR(null)
-    setR(await extract(file))
+    setR(await extract(file, { thumbnailUrl: thumbUrl.trim() || undefined }))
     setBusy(false)
   }
 
@@ -169,6 +170,10 @@ function ExtractCard() {
         <strong>Drop a PDF here</strong> or click to choose
         <input ref={fileRef} type="file" accept="application/pdf" hidden onChange={e => { const f = e.target.files?.[0]; if (f) go(f) }} />
       </div>
+      <div style={{ marginTop: 10 }}>
+        <label>Thumbnail URL (optional) — embedded into the AAS</label>
+        <input type="text" placeholder="https://…/product.jpg" value={thumbUrl} onChange={e => setThumbUrl(e.target.value)} />
+      </div>
 
       {result?.result && (
         <>
@@ -177,6 +182,24 @@ function ExtractCard() {
             <span>submodels <b>{(result.result.submodels || []).map((s: any) => s.idShort).join(", ") || "—"}</b></span>
             {result.domain && <span>domain <b>{result.domain}</b></span>}
           </div>
+          {/* knowledge layers that fired — proof the API runs the full pipeline */}
+          <div className="kv">
+            {result.domain && <span className="pill ok">knowledge pack</span>}
+            {result.vendorTemplateId && <span className="pill ok">vendor: {result.vendorTemplateId}</span>}
+            {typeof result.derivedFieldsCount === "number" && result.derivedFieldsCount > 0 && <span className="pill ok">derived ×{result.derivedFieldsCount}</span>}
+            {typeof result.epdFieldsFilled === "number" && result.epdFieldsFilled > 0 && <span className="pill ok">EPD ×{result.epdFieldsFilled}</span>}
+            {typeof result.visionMarkersFilled === "number" && result.visionMarkersFilled > 0 && <span className="pill ok">vision ×{result.visionMarkersFilled}</span>}
+          </div>
+          {result.thumbnailDataUrl && (
+            <div style={{ marginTop: 10 }}>
+              <div className="group-h">embedded thumbnail</div>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={result.thumbnailDataUrl} alt="thumbnail" style={{ maxHeight: 120, borderRadius: 8, border: "1px solid var(--line)" }} />
+            </div>
+          )}
+          {!result.thumbnailDataUrl && result.thumbnailFetchReason && (
+            <div className="path" style={{ marginTop: 8 }}>thumbnail not embedded: {result.thumbnailFetchReason}</div>
+          )}
           <div className="row" style={{ marginTop: 6 }}>
             <button onClick={() => downloadAs("aasx")} disabled={!!exp}>{exp === "aasx" ? "Packaging…" : "↓ Download .aasx"}</button>
             <button className="ghost" onClick={() => downloadAs("xml")} disabled={!!exp}>{exp === "xml" ? "Serializing…" : "↓ Download XML"}</button>

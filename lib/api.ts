@@ -73,12 +73,15 @@ async function run(
   return base
 }
 
-export function extract(file: File, opts?: { idPrefix?: string; llmKey?: string }): Promise<ApiResult> {
+export function extract(file: File, opts?: { idPrefix?: string; llmKey?: string; thumbnailUrl?: string }): Promise<ApiResult> {
   const fd = new FormData()
   fd.append("file", file)
   fd.append("idPrefix", opts?.idPrefix || "urn:extracted")
   if (opts?.llmKey) fd.append("apiKey", opts.llmKey)
-  return run("extract", "POST", { body: fd }, curlFor("extract", "POST", { file: true, form: { idPrefix: opts?.idPrefix || "urn:extracted" } }))
+  if (opts?.thumbnailUrl) fd.append("thumbnailUrl", opts.thumbnailUrl)
+  const form: Record<string, string> = { idPrefix: opts?.idPrefix || "urn:extracted" }
+  if (opts?.thumbnailUrl) form.thumbnailUrl = opts.thumbnailUrl
+  return run("extract", "POST", { body: fd }, curlFor("extract", "POST", { file: true, form }))
 }
 
 export function searchDatasheets(query: string): Promise<ApiResult> {
