@@ -11,6 +11,7 @@ import { NextRequest } from "next/server"
  */
 
 export const runtime = "nodejs"
+export const maxDuration = 60
 
 const MAX_BYTES = 30 * 1024 * 1024 // 30 MB
 

@@ -15,6 +15,10 @@ import { NextRequest } from "next/server"
  */
 
 export const runtime = "nodejs"
+// Extraction (with the knowledge pack + vision pass) can take up to ~3 min
+// upstream; the proxy must outlast it, or a deployed playground 504s while
+// the real API is still working. (No effect on `next dev`, which is unbounded.)
+export const maxDuration = 300
 
 const API_BASE = (process.env.AAS_API_BASE || "https://aas-studio.vercel.app/api/v1").replace(/\/$/, "")
 
