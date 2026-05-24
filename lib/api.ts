@@ -108,6 +108,14 @@ export function health(): Promise<ApiResult> {
   return run("health", "GET", {}, curlFor("health", "GET", {}))
 }
 
+export type MergeSource = { sourceId: string; authority: "manufacturer" | "distributor" | "third-party"; result: unknown }
+
+/** Multi-source consensus merge of N already-extracted results. */
+export function merge(sources: MergeSource[]): Promise<ApiResult> {
+  const body = { sources }
+  return run("merge", "POST", jsonInit(body), curlFor("merge", "POST", { json: { sources: [{ sourceId: "src-1", authority: "manufacturer", result: "{…ExtractionResult…}" }] } }))
+}
+
 /** Fetch a datasheet PDF (found via search) through the guarded fetch proxy, as
  *  a File ready to hand to extract(). Returns null on failure. */
 export async function fetchDatasheet(url: string): Promise<File | null> {

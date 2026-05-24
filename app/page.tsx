@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import { getKey, setKey, extract, searchDatasheets, validate, fix, exportAas, fetchDatasheet, PUBLIC_API_BASE, type ApiResult } from "@/lib/api"
+import { getKey, setKey, extract, searchDatasheets, validate, fix, exportAas, fetchDatasheet, merge, type MergeSource, PUBLIC_API_BASE, type ApiResult } from "@/lib/api"
 import { parseIssues, groupByConstraint, type ParsedIssue } from "@/lib/validation"
 
 const SAMPLE_SUBMODELS = JSON.stringify(
@@ -241,6 +241,42 @@ function FindByNameCard() {
     if (res.status >= 400 || (!res.blob && !res.text)) { setChainErr("Export failed."); return }
     downloadResult(res, rr.assetIdShort || "aas", "aasx")
   }
+
+  // Multi-source consensus: extract each selected hit, then /merge with
+  // authority weighting — the same consensus the app wizard runs, assembled
+  // client-side from the public endpoints.
+  const [picked, setPicked] = useState<Set<number>>(new Set())
+  const [cons, setCons] = useState<string | null>(null)
+  const [consErr, setConsErr] = useState<string | null>(null)
+  const [mergedRes, setMergedRes] = useState<ApiResult | null>(null)
+  const toggle = (i: number) => setPicked(p => { const n = new Set(p); n.has(i) ? n.delete(i) : n.add(i); return n })
+  const authorityClass = (a: unknown): MergeSource["authority"] => {
+    const n = typeof a === "number" ? a : 0
+    return n >= 70 ? "manufacturer" : n >= 40 ? "distributor" : "third-party"
+  }
+  async function buildConsensus() {
+    const chosen = [...picked].map(i => hits[i]).filter(Boolean)
+    if (chosen.length < 2) { setConsErr("Pick at least 2 sources."); return }
+    setConsErr(null); setMergedRes(null)
+    const sources: MergeSource[] = []
+    for (let k = 0; k < chosen.length; k++) {
+      const url = chosen[k].url || chosen[k].link
+      setCons(`source ${k + 1}/${chosen.length}: fetching…`)
+      const file = await fetchDatasheet(url)
+      if (!file) continue
+      setCons(`source ${k + 1}/${chosen.length}: extracting…`)
+      const ex = await extract(file)
+      const rr = (ex.json as any)?.result
+      if (rr) sources.push({ sourceId: url, authority: authorityClass(chosen[k].authority), result: rr })
+    }
+    if (sources.length < 2) { setCons(null); setConsErr("Could not extract 2+ sources (fetch/extract failed)."); return }
+    setCons("merging (consensus voting)…")
+    const res = await merge(sources)
+    setCons(null); setMergedRes(res)
+    if (res.status >= 400) setConsErr((res.json as any)?.message || `Merge failed (HTTP ${res.status})`)
+  }
+  const mergedResult = (mergedRes?.json as any)?.merged
+
   return (
     <div className="card">
       <h2>2 · Find by name {busy && <span className="spin" />}</h2>
@@ -255,11 +291,15 @@ function FindByNameCard() {
             const url = h.url || h.link
             return (
               <div className="hit" key={i}>
-                <div><b>{h.title || h.name || h.authority || "result"}</b> {h.authority && <span className="path">· {h.authority}</span>}</div>
+                <div className="row" style={{ gap: 8 }}>
+                  <input type="checkbox" checked={picked.has(i)} onChange={() => toggle(i)} title="select for consensus merge" />
+                  <b>{h.title || h.name || "result"}</b>
+                  {typeof h.authority !== "undefined" && <span className="path">· authority {String(h.authority)}</span>}
+                </div>
                 {url && <a href={url} target="_blank" rel="noreferrer">{url}</a>}
                 {url && (
                   <div className="row" style={{ marginTop: 8 }}>
-                    <button className="ghost" style={{ padding: "4px 10px", fontSize: 12 }} disabled={!!chain} onClick={() => toAasx(url, i)}>
+                    <button className="ghost" style={{ padding: "4px 10px", fontSize: 12 }} disabled={!!chain || !!cons} onClick={() => toAasx(url, i)}>
                       {chain?.i === i ? chain.step : "Extract → .aasx"}
                     </button>
                     {chain?.i === i && <span className="spin" />}
@@ -268,6 +308,28 @@ function FindByNameCard() {
               </div>
             )
           })}
+          {/* Multi-source consensus across selected sources */}
+          <div className="row" style={{ marginTop: 6 }}>
+            <button disabled={picked.size < 2 || !!cons || !!chain} onClick={buildConsensus}>
+              {cons || `Build consensus (${picked.size} selected)`}
+            </button>
+            {cons && <span className="spin" />}
+            <span className="path">authority-weighted vote across sources</span>
+          </div>
+        </div>
+      )}
+      {consErr && <div className="verdict bad" style={{ marginTop: 10 }}>✗ {consErr}</div>}
+      {mergedResult && (
+        <div style={{ marginTop: 10 }}>
+          <div className="group-h">consensus result</div>
+          <div className="kv">
+            <span>asset <b className="mono">{mergedResult.assetIdShort || "—"}</b></span>
+            <span>submodels <b>{(mergedResult.submodels || []).map((s: any) => s.idShort).join(", ") || "—"}</b></span>
+          </div>
+          <button className="ghost" style={{ marginTop: 6 }} onClick={async () => {
+            const res = await exportAas(extractionToExportBody(mergedResult), "aasx")
+            if (res.blob || res.text) downloadResult(res, mergedResult.assetIdShort || "consensus", "aasx")
+          }}>↓ Download consensus .aasx</button>
         </div>
       )}
       {chainErr && <div className="verdict bad" style={{ marginTop: 10 }}>✗ {chainErr}</div>}
