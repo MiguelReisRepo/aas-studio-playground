@@ -12,7 +12,8 @@ it doubles as living, copy-pasteable API documentation.
 
 | Step | Endpoint | What you do |
 |---|---|---|
-| Extract | `POST /v1/extract` | drag-drop a PDF → draft AAS + a **compliance verdict** |
+| Model health | `GET /v1/providers` | which LLMs are usable right now — **ok / out of credits / rate-limited / invalid key**, with the active arbiter highlighted |
+| Extract | `POST /v1/extract` | drag-drop a PDF → draft AAS + a **compliance verdict**, plus the **ensemble** state ("N of M models voted") and how split fields were arbitrated |
 | Find by name | `POST /v1/search-datasheets` | ranked datasheet URLs for a product name |
 | Validate | `POST /v1/validate` | paste AAS XML → XSD 3.1 + AASd-* gate, errors as explicit cards |
 | Fix | `POST /v1/fix` | deterministic XML repair |
