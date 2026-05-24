@@ -33,18 +33,25 @@ origins and there's no CORS to configure.
 
 ```bash
 npm install
-npm run dev            # http://localhost:3000
+npm run dev
+# http://localhost:3000
 ```
+
+Run the two commands on separate lines (Windows PowerShell 5.1 doesn't accept `&&`).
 
 Open the app, paste your AAS Studio API key (stored in your browser only), and go.
 
-Point at a different backend (e.g. local dev) with an env var:
+Point at a different backend (e.g. local dev) with an env var. Defaults to
+`https://aas-studio.vercel.app/api/v1`.
 
 ```bash
+# macOS / Linux
 AAS_API_BASE=http://localhost:3002/api/v1 npm run dev
 ```
-
-Defaults to `https://aas-studio.vercel.app/api/v1`.
+```powershell
+# Windows PowerShell
+$env:AAS_API_BASE="http://localhost:3002/api/v1"; npm run dev
+```
 
 ## Get an API key
 
