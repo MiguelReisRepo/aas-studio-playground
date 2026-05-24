@@ -1,0 +1,23 @@
+{
+  "name": "aas-studio-playground",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Shareable test console for the AAS Studio public API — drag-drop a PDF, find by name, validate, fix, export. Exercises the integration contract real client tools use.",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "next": "14.2.15",
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "20.16.11",
+    "@types/react": "18.3.11",
+    "@types/react-dom": "18.3.0",
+    "typescript": "5.6.3"
+  }
+}
