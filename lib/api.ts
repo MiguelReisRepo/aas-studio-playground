@@ -63,9 +63,16 @@ async function run(
   const filename = /filename="?([^"]+)"?/.exec(cd)?.[1]
   const base: ApiResult = { ok: res.ok, status: res.status, ms, contentType, curl, filename }
 
+  // Binary downloads must be read as a Blob, NOT text — even when their
+  // content-type contains "xml". The .aasx package is
+  // `application/asset-administration-shell-package+xml` (an OPC ZIP); reading
+  // it via res.text() mangles the bytes and produces a corrupt, unopenable
+  // file ("no AAS shell found"). Treat attachments + zip/package types as binary.
+  const isBinary = /attachment/i.test(cd) || /zip|octet-stream|package/i.test(contentType)
+
   if (contentType.includes("application/json")) {
     base.json = await res.json().catch(() => undefined)
-  } else if (contentType.includes("xml") || contentType.includes("text")) {
+  } else if (!isBinary && (contentType.includes("xml") || contentType.includes("text"))) {
     base.text = await res.text().catch(() => undefined)
   } else {
     base.blob = await res.blob().catch(() => undefined)
