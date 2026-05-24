@@ -1,13 +1,37 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import { getKey, setKey, extract, searchDatasheets, validate, fix, exportAas, PUBLIC_API_BASE, type ApiResult } from "@/lib/api"
+import { getKey, setKey, extract, searchDatasheets, validate, fix, exportAas, fetchDatasheet, PUBLIC_API_BASE, type ApiResult } from "@/lib/api"
 import { parseIssues, groupByConstraint, type ParsedIssue } from "@/lib/validation"
 
 const SAMPLE_SUBMODELS = JSON.stringify(
   [{ idShort: "Nameplate", id: "urn:demo:Nameplate", submodelElements: [{ idShort: "ManufacturerName", modelType: "MultiLanguageProperty", value: { en: "QA GmbH" } }] }],
   null, 2,
 )
+
+/** Turn an export ApiResult (xml text or .aasx blob) into a browser download. */
+function downloadResult(res: ApiResult, name: string, format: "xml" | "aasx"): boolean {
+  const blob = res.blob || (res.text ? new Blob([res.text], { type: "application/xml" }) : null)
+  if (!blob) return false
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement("a")
+  a.href = url
+  a.download = res.filename || `${name}.${format === "aasx" ? "aasx" : "xml"}`
+  document.body.appendChild(a); a.click(); a.remove()
+  URL.revokeObjectURL(url)
+  return true
+}
+
+/** Map an /extract result's submodels to the /export request shape. */
+function extractionToExportBody(rr: any): Record<string, unknown> {
+  const submodels = (rr?.submodels || []).map((sm: any) => ({
+    idShort: sm.idShort,
+    id: sm.id || `${rr.assetId || "urn:extracted"}:${sm.idShort}`,
+    semanticId: sm.semanticId,
+    submodelElements: sm.elements || sm.submodelElements || [],
+  }))
+  return { submodels, idShort: rr?.assetIdShort, id: rr?.assetId, assetKind: rr?.assetKind, globalAssetId: rr?.assetId }
+}
 
 export default function Playground() {
   const [keyInput, setKeyInput] = useState("")
@@ -116,9 +140,20 @@ function ExtractCard() {
     setBusy(false)
   }
 
+  const [exp, setExp] = useState<"" | "xml" | "aasx">("")
+  const [expErr, setExpErr] = useState<ApiResult | null>(null)
   const result = r?.json as any
   const compliance = result?.compliance
   const issues = compliance ? parseIssues(compliance.errors) : []
+
+  async function downloadAs(format: "xml" | "aasx") {
+    if (!result?.result) return
+    setExp(format); setExpErr(null)
+    const res = await exportAas(extractionToExportBody(result.result), format)
+    setExp("")
+    if (res.status >= 400 || (!res.blob && !res.text)) { setExpErr(res); return }
+    downloadResult(res, result.result.assetIdShort || "aas", format)
+  }
 
   return (
     <div className="card">
@@ -136,11 +171,19 @@ function ExtractCard() {
       </div>
 
       {result?.result && (
-        <div className="kv" style={{ marginTop: 14 }}>
-          <span>asset <b className="mono">{result.result.assetIdShort || "—"}</b></span>
-          <span>submodels <b>{(result.result.submodels || []).map((s: any) => s.idShort).join(", ") || "—"}</b></span>
-          {result.domain && <span>domain <b>{result.domain}</b></span>}
-        </div>
+        <>
+          <div className="kv" style={{ marginTop: 14 }}>
+            <span>asset <b className="mono">{result.result.assetIdShort || "—"}</b></span>
+            <span>submodels <b>{(result.result.submodels || []).map((s: any) => s.idShort).join(", ") || "—"}</b></span>
+            {result.domain && <span>domain <b>{result.domain}</b></span>}
+          </div>
+          <div className="row" style={{ marginTop: 6 }}>
+            <button onClick={() => downloadAs("aasx")} disabled={!!exp}>{exp === "aasx" ? "Packaging…" : "↓ Download .aasx"}</button>
+            <button className="ghost" onClick={() => downloadAs("xml")} disabled={!!exp}>{exp === "xml" ? "Serializing…" : "↓ Download XML"}</button>
+            {exp && <span className="spin" />}
+          </div>
+          {expErr && <ErrorNote r={expErr} />}
+        </>
       )}
       {compliance && <ValidationResults valid={!!compliance.valid} issues={issues} gate={compliance.validation} />}
       {r && !compliance && r.status !== 200 && <ErrorNote r={r} />}
@@ -154,26 +197,57 @@ function FindByNameCard() {
   const [q, setQ] = useState("")
   const [busy, setBusy] = useState(false)
   const [r, setR] = useState<ApiResult | null>(null)
+  const [chain, setChain] = useState<{ i: number; step: string } | null>(null)
+  const [chainErr, setChainErr] = useState<string | null>(null)
   async function go() { if (!q.trim()) return; setBusy(true); setR(await searchDatasheets(q.trim())); setBusy(false) }
   const hits = (r?.json as any)?.results || (r?.json as any)?.hits || []
+
+  // hit URL → fetch PDF (guarded proxy) → /extract → /export .aasx → download.
+  // The public API has no URL→AAS path, so the console chains it.
+  async function toAasx(url: string, i: number) {
+    setChainErr(null); setChain({ i, step: "fetching PDF…" })
+    const file = await fetchDatasheet(url)
+    if (!file) { setChain(null); setChainErr("Couldn't fetch that PDF (blocked host, CORS, or too large)."); return }
+    setChain({ i, step: "extracting…" })
+    const ex = await extract(file)
+    const rr = (ex.json as any)?.result
+    if (!rr) { setChain(null); setChainErr((ex.json as any)?.message || (ex.json as any)?.error || `Extraction failed (HTTP ${ex.status})`); return }
+    setChain({ i, step: "packaging .aasx…" })
+    const res = await exportAas(extractionToExportBody(rr), "aasx")
+    setChain(null)
+    if (res.status >= 400 || (!res.blob && !res.text)) { setChainErr("Export failed."); return }
+    downloadResult(res, rr.assetIdShort || "aas", "aasx")
+  }
   return (
     <div className="card">
       <h2>2 · Find by name {busy && <span className="spin" />}</h2>
-      <div className="hint">POST /search-datasheets — ranked manufacturer/distributor datasheet URLs for a product name.</div>
+      <div className="hint">POST /search-datasheets — web search for datasheet URLs. Use a real product name with spaces (e.g. "LG OLED65G5"), not a compacted idShort like "LGOLEDevoG54KTV" — a mangled query returns low-relevance results.</div>
       <div className="row">
         <input type="text" placeholder='e.g. "LG OLED65G54LW"' value={q} onChange={e => setQ(e.target.value)} onKeyDown={e => e.key === "Enter" && go()} style={{ maxWidth: 420 }} />
         <button onClick={go} disabled={busy}>Search</button>
       </div>
       {Array.isArray(hits) && hits.length > 0 && (
         <div style={{ marginTop: 12 }}>
-          {hits.slice(0, 8).map((h: any, i: number) => (
-            <div className="hit" key={i}>
-              <div><b>{h.title || h.name || h.authority || "result"}</b> {h.authority && <span className="path">· {h.authority}</span>}</div>
-              {(h.url || h.link) && <a href={h.url || h.link} target="_blank" rel="noreferrer">{h.url || h.link}</a>}
-            </div>
-          ))}
+          {hits.slice(0, 8).map((h: any, i: number) => {
+            const url = h.url || h.link
+            return (
+              <div className="hit" key={i}>
+                <div><b>{h.title || h.name || h.authority || "result"}</b> {h.authority && <span className="path">· {h.authority}</span>}</div>
+                {url && <a href={url} target="_blank" rel="noreferrer">{url}</a>}
+                {url && (
+                  <div className="row" style={{ marginTop: 8 }}>
+                    <button className="ghost" style={{ padding: "4px 10px", fontSize: 12 }} disabled={!!chain} onClick={() => toAasx(url, i)}>
+                      {chain?.i === i ? chain.step : "Extract → .aasx"}
+                    </button>
+                    {chain?.i === i && <span className="spin" />}
+                  </div>
+                )}
+              </div>
+            )
+          })}
         </div>
       )}
+      {chainErr && <div className="verdict bad" style={{ marginTop: 10 }}>✗ {chainErr}</div>}
       {r && r.status !== 200 && <ErrorNote r={r} />}
       <Inspector r={r} />
     </div>
@@ -186,9 +260,36 @@ function ValidateFixCard() {
   const [busy, setBusy] = useState<"" | "validate" | "fix">("")
   const [r, setR] = useState<ApiResult | null>(null)
   const [fixed, setFixed] = useState<string | null>(null)
+  const [over, setOver] = useState(false)
+  const [loadNote, setLoadNote] = useState<string | null>(null)
+  const fileRef = useRef<HTMLInputElement>(null)
 
   async function doValidate() { if (!xml.trim()) return; setBusy("validate"); setFixed(null); setR(await validate(xml)); setBusy("") }
   async function doFix() { if (!xml.trim()) return; setBusy("fix"); const res = await fix(xml); setR(res); const fx = (res.json as any)?.xml; if (fx) setFixed(fx); setBusy("") }
+
+  // Load a dropped/picked .xml | .json | .aasx into the editor. .aasx is a ZIP,
+  // so we unzip it client-side and pull out the AAS XML part.
+  async function loadFile(file: File) {
+    setLoadNote(null); setR(null); setFixed(null)
+    const name = file.name.toLowerCase()
+    try {
+      if (name.endsWith(".aasx")) {
+        const JSZip = (await import("jszip")).default
+        const zip = await JSZip.loadAsync(await file.arrayBuffer())
+        const xmlEntry = Object.keys(zip.files).find(n => n.toLowerCase().endsWith(".xml") && !n.toLowerCase().includes("_rels") && !n.toLowerCase().includes("content_types"))
+        if (!xmlEntry) { setLoadNote("No AAS XML part found inside the .aasx package."); return }
+        setXml(await zip.files[xmlEntry].async("string"))
+        setLoadNote(`Loaded ${xmlEntry} from the .aasx package.`)
+      } else {
+        const text = await file.text()
+        setXml(text)
+        if (name.endsWith(".json")) setLoadNote("Loaded JSON. Note: the /validate gate is XSD (XML) — convert/export to XML first, or expect an XML-parse error.")
+        else setLoadNote(`Loaded ${file.name}.`)
+      }
+    } catch (e) {
+      setLoadNote(`Could not read the file: ${e instanceof Error ? e.message : String(e)}`)
+    }
+  }
 
   const v = r?.json as any
   const isValidate = v && typeof v.valid === "boolean"
@@ -197,7 +298,19 @@ function ValidateFixCard() {
   return (
     <div className="card">
       <h2>3 · Validate / Fix {busy && <span className="spin" />}</h2>
-      <div className="hint">POST /validate (XSD 3.1 + AASd-* gate) and POST /fix (deterministic XML repair). Paste AAS XML.</div>
+      <div className="hint">POST /validate (XSD 3.1 + AASd-* gate) and POST /fix (deterministic XML repair). Drop a file or paste AAS XML.</div>
+      <div
+        className={`drop ${over ? "over" : ""}`}
+        style={{ padding: 18, marginBottom: 12 }}
+        onDragOver={e => { e.preventDefault(); setOver(true) }}
+        onDragLeave={() => setOver(false)}
+        onDrop={e => { e.preventDefault(); setOver(false); const f = e.dataTransfer.files?.[0]; if (f) loadFile(f) }}
+        onClick={() => fileRef.current?.click()}
+      >
+        <strong>Drop a .aasx / .xml / .json</strong> or click to choose
+        <input ref={fileRef} type="file" accept=".aasx,.xml,.json,application/xml,text/xml,application/json" hidden onChange={e => { const f = e.target.files?.[0]; if (f) loadFile(f) }} />
+      </div>
+      {loadNote && <div className="path" style={{ marginBottom: 8 }}>{loadNote}</div>}
       <label>AAS XML</label>
       <textarea className="mono" placeholder="<environment xmlns=&quot;https://admin-shell.io/aas/3/1&quot;> …" value={xml} onChange={e => setXml(e.target.value)} />
       <div className="row" style={{ marginTop: 10 }}>

@@ -105,6 +105,20 @@ export function health(): Promise<ApiResult> {
   return run("health", "GET", {}, curlFor("health", "GET", {}))
 }
 
+/** Fetch a datasheet PDF (found via search) through the guarded fetch proxy, as
+ *  a File ready to hand to extract(). Returns null on failure. */
+export async function fetchDatasheet(url: string): Promise<File | null> {
+  try {
+    const res = await fetch(`/api/fetch?url=${encodeURIComponent(url)}`)
+    if (!res.ok) return null
+    const blob = await res.blob()
+    const base = (url.split("/").pop() || "datasheet").split("?")[0] || "datasheet"
+    return new File([blob], base.toLowerCase().endsWith(".pdf") ? base : `${base}.pdf`, { type: "application/pdf" })
+  } catch {
+    return null
+  }
+}
+
 function jsonInit(body: unknown): RequestInit {
   return { headers: { "content-type": "application/json" }, body: JSON.stringify(body) }
 }
