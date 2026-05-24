@@ -193,6 +193,28 @@ function ExtractCard() {
             {typeof result.epdFieldsFilled === "number" && result.epdFieldsFilled > 0 && <span className="pill ok">EPD ×{result.epdFieldsFilled}</span>}
             {typeof result.visionMarkersFilled === "number" && result.visionMarkersFilled > 0 && <span className="pill ok">vision ×{result.visionMarkersFilled}</span>}
           </div>
+          {/* multi-model ensemble state — which models voted, and how the
+              splits were settled. Present only when >=2 models actually ran. */}
+          {result.ensemble && (
+            <div style={{ marginTop: 10 }}>
+              <div className="group-h">ensemble · {result.ensemble.succeeded?.length || 0} of {result.ensemble.requested?.length || 0} models voted</div>
+              <div className="kv">
+                {(result.ensemble.traces || []).map((t: any) => (
+                  <span key={t.provider} className={`pill ${t.ok ? "ok" : "warn"}`}>
+                    {t.provider}{t.ok ? "" : " ✕"}
+                  </span>
+                ))}
+              </div>
+              {result.arbiter && result.arbiter.conflicts > 0 && (
+                <div className="path" style={{ marginTop: 6 }}>
+                  {result.arbiter.conflicts} field{result.arbiter.conflicts === 1 ? "" : "s"} split ·{" "}
+                  {result.arbiter.arbiter
+                    ? `${result.arbiter.arbitrated} resolved by ${result.arbiter.arbiter} (grounded)`
+                    : `kept majority (${result.arbiter.fallbackReason || "no arbiter"})`}
+                </div>
+              )}
+            </div>
+          )}
           {result.thumbnailDataUrl && (
             <div style={{ marginTop: 10 }}>
               <div className="group-h">embedded thumbnail</div>
